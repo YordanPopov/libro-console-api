@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -15,18 +16,15 @@ namespace LibroConsoleAPI.IntegrationTests.XUnit
         private readonly BookManagerFixture _fixture;
         private readonly IBookManager _bookManager;
         private readonly TestLibroDbContext _dbContext;
+        Book newBook;
 
         public AddBookAsyncTests()
         {
             _fixture = new BookManagerFixture();
             _bookManager = _fixture.BookManager;
             _dbContext = _fixture.DbContext;
-        }
 
-        [Fact]
-        public async Task AddBookAsync_ShouldAddBook()
-        {
-            var newBook = new Book
+            newBook = new Book
             {
                 Title = "Test Book",
                 Author = "John Doe",
@@ -36,7 +34,11 @@ namespace LibroConsoleAPI.IntegrationTests.XUnit
                 Pages = 100,
                 Price = 19.99
             };
+        }
 
+        [Fact]
+        public async Task AddBookAsync_ShouldAddBook()
+        {
             await _bookManager.AddAsync(newBook);
 
             var bookInDb = await _dbContext.Books.FirstOrDefaultAsync(b => b.ISBN == newBook.ISBN);
@@ -55,24 +57,13 @@ namespace LibroConsoleAPI.IntegrationTests.XUnit
             if (title == "c")
                 title = new string('c', 256);
 
-            var newBook = new Book
-            {
-                Title = title,
-                Author = "John Doe",
-                ISBN = "1234567890123",
-                YearPublished = 2021,
-                Genre = "Fiction",
-                Pages = 100,
-                Price = 19.99
-            };
+            newBook.Title = title;
 
-            var act = async () => await _bookManager.AddAsync(newBook);
+            var exception = await Assert.ThrowsAsync<ValidationException>(() => _bookManager.AddAsync(newBook));
+            var bookInDb = await _dbContext.Books.AnyAsync();
 
-            var exception = Assert.ThrowsAsync<ValidationException>(act);
-            var bookInDb = await _dbContext.Books.FirstOrDefaultAsync(b => b.Title == title);
-
-            Assert.Equal("Book is invalid.", exception.Result.Message);
-            Assert.Null(bookInDb);
+            Assert.Equal("Book is invalid.", exception.Message);
+            Assert.False(bookInDb);
         }
 
         [Theory]
@@ -85,24 +76,13 @@ namespace LibroConsoleAPI.IntegrationTests.XUnit
             if (author == "c")
                 author = new string('c', 101);
 
-            var newBook = new Book
-            {
-                Title = "Test Book Title",
-                Author = author,
-                ISBN = "1234567890123",
-                YearPublished = 2021,
-                Genre = "Fiction",
-                Pages = 100,
-                Price = 19.99
-            };
+            newBook.Author = author;
 
-            var act = async () => await _bookManager.AddAsync(newBook);
+            var exception = await Assert.ThrowsAsync<ValidationException>(() => _bookManager.AddAsync(newBook));
+            var booksInDb = await _dbContext.Books.AnyAsync();
 
-            var exception = Assert.ThrowsAsync<ValidationException>(act);
-            var booksInDb = await _dbContext.Books.FirstOrDefaultAsync(b => b.Author == author);
-
-            Assert.Equal("Book is invalid.", exception.Result.Message);
-            Assert.Null(booksInDb);
+            Assert.Equal("Book is invalid.", exception.Message);
+            Assert.False(booksInDb);
         }
 
         [Theory]
@@ -122,24 +102,85 @@ namespace LibroConsoleAPI.IntegrationTests.XUnit
         [InlineData("?????????????")]
         public async Task TryToAddBookWith_InvalidISBN_ShouldThrowException(string isbn)
         {
-            var newBook = new Book
-            {
-                Title = "Test book",
-                Author = "John Doe",
-                ISBN = isbn,
-                YearPublished = 2021,
-                Genre = "Fiction",
-                Pages = 100,
-                Price = 19.99
-            };
+            newBook.ISBN = isbn;
 
-            var act = async () => await _bookManager.AddAsync(newBook);
+            var exception = await Assert.ThrowsAsync<ValidationException>(() => _bookManager.AddAsync(newBook));
+            var bookInDb = await _dbContext.Books.AnyAsync();
 
-            var exception = Assert.ThrowsAsync<ValidationException>(act);
-            var bookInDb = await _dbContext.Books.FirstOrDefaultAsync(b => b.ISBN == isbn);
+            Assert.Equal("Book is invalid.", exception.Message);
+            Assert.False(bookInDb);
+        }
 
-            Assert.Equal("Book is invalid.", exception.Result.Message);
-            Assert.Null(bookInDb);
+        [Theory]
+        [InlineData(null)]
+        [InlineData(0)]
+        [InlineData(1699)]
+        [InlineData(2025)]
+        [InlineData(-2021)]
+        [InlineData(int.MaxValue)]
+        [InlineData(int.MinValue)]
+        public async Task TryToAddBookWith_InvalidYearPublished_ShouldThrowException(int yearPublished)
+        {
+            newBook.YearPublished = yearPublished;
+
+            var exception = await Assert.ThrowsAsync<ValidationException>(() => _bookManager.AddAsync(newBook));
+            var bookInDb = await _dbContext.Books.AnyAsync();
+
+            Assert.Equal("Book is invalid.", exception.Message);
+            Assert.False(bookInDb);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("  ")]
+        [InlineData("c")]
+        public async Task TryToAddBookWith_InvalidGenre_ShouldThrowException(string genre)
+        {
+            if (genre == "c")
+                genre = new string('c', 51);
+            
+            newBook.Genre = genre;
+
+            var exception = await Assert.ThrowsAsync<ValidationException>(() => _bookManager.AddAsync(newBook));
+            var bookInDb = await _dbContext.Books.AnyAsync();
+
+            Assert.Equal("Book is invalid.", exception.Message);
+            Assert.False(bookInDb);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData(0)]
+        [InlineData(-1)]
+        [InlineData(int.MinValue)]
+        //TODO: int.MaxValue + 1
+        public async Task TryToAddBookWith_InvalidPages_ShouldThrowException(int pages)
+        {
+            newBook.Pages = pages;
+
+            var exception = await Assert.ThrowsAsync<ValidationException>(() => _bookManager.AddAsync(newBook));
+            var bookInDb = await _dbContext.Books.AnyAsync();
+
+            Assert.Equal("Book is invalid.", exception.Message);
+            Assert.False(bookInDb);
+        }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(0.0099)]
+        [InlineData(-1)]
+        [InlineData(double.MinValue)]
+        public async Task TryToAddBookWith_InvalidPrice_ShouldThrowException(double price)
+        {
+            
+            newBook.Price = price;
+
+            var exception = await Assert.ThrowsAsync<ValidationException>(() => _bookManager.AddAsync(newBook));
+            var bookInDb = await _dbContext.Books.AnyAsync();
+
+            Assert.Equal("Book is invalid.", exception.Message);
+            Assert.False(bookInDb);
         }
     }
 }
