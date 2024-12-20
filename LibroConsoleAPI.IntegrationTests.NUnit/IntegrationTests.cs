@@ -1,8 +1,11 @@
 ﻿using LibroConsoleAPI.Business;
 using LibroConsoleAPI.Business.Contracts;
 using LibroConsoleAPI.Data.Models;
+using LibroConsoleAPI.DataAccess;
 using LibroConsoleAPI.Repositories;
 using Microsoft.EntityFrameworkCore;
+using NuGet.Frameworks;
+using System;
 using System.ComponentModel.DataAnnotations;
 
 namespace LibroConsoleAPI.IntegrationTests.NUnit
@@ -10,7 +13,7 @@ namespace LibroConsoleAPI.IntegrationTests.NUnit
     public  class IntegrationTests
     {
         private TestLibroDbContext dbContext;
-        private IBookManager bookManager;
+        private BookManager bookManager;
 
         [SetUp]
         public void SetUp()
@@ -30,6 +33,7 @@ namespace LibroConsoleAPI.IntegrationTests.NUnit
         public async Task AddBookAsync_ShouldAddBook()
         {
             // Arrange
+            DatabaseSeeder.SeedDatabaseAsync(dbContext, bookManager);
             var newBook = new Book
             {
                 Title = "Test Book",
@@ -54,77 +58,157 @@ namespace LibroConsoleAPI.IntegrationTests.NUnit
         [Test]
         public async Task AddBookAsync_TryToAddBookWithInvalidCredentials_ShouldThrowException()
         {
-            Assert.Pass();
-        }
+            DatabaseSeeder.SeedDatabaseAsync(dbContext, bookManager);
+            Book invalidBook = new Book
+            {
+                Author = "John Doe",
+                ISBN = "1234567890123",
+                YearPublished = 2021,
+                Genre = "Fiction",
+                Pages = 100,
+                Price = 19.99
+            };
 
+            var ex = Assert.ThrowsAsync<ValidationException>(async () => await bookManager.AddAsync(invalidBook));
+            Assert.That(ex.Message, Is.EqualTo("Book is invalid."));
+        }
 
         [Test]
         public async Task DeleteBookAsync_WithValidISBN_ShouldRemoveBookFromDb()
         {
-            Assert.Pass();
+            DatabaseSeeder.SeedDatabaseAsync(dbContext, bookManager);
+            var bookToDelete = dbContext.Books.First();
+
+            await bookManager.DeleteAsync(bookToDelete.ISBN);
+
+            var booksInDb = dbContext.Books.ToList();
+            Assert.That(booksInDb.Count(), Is.EqualTo(9));
+            Assert.That(booksInDb, Does.Not.Contain(bookToDelete));
         }
 
-
-        [Test]
-        public async Task DeleteBookAsync_TryToDeleteWithNullOrWhiteSpaceISBN_ShouldThrowException()
+        [TestCase(null)]
+        [TestCase("")]
+        [TestCase(" ")]
+        public async Task DeleteBookAsync_TryToDeleteWithNullOrWhiteSpaceISBN_ShouldThrowException(string isbn)
         {
-            Assert.Pass();
+            DatabaseSeeder.SeedDatabaseAsync(dbContext, bookManager);
+            var ex = Assert.ThrowsAsync<ArgumentException>(async () => await bookManager.DeleteAsync(isbn));
+            Assert.That(ex.Message, Is.EqualTo("ISBN cannot be empty."));
         }
-
 
         [Test]
         public async Task GetAllAsync_WhenBooksExist_ShouldReturnAllBooks()
         {
-            Assert.Pass();
+            DatabaseSeeder.SeedDatabaseAsync(dbContext, bookManager);
+
+            var books = await bookManager.GetAllAsync();
+            Assert.That(books.Count(), Is.EqualTo(10));
         }
 
 
         [Test]
         public async Task GetAllAsync_WhenNoBooksExist_ShouldThrowKeyNotFoundException()
         {
-            Assert.Pass();
+            var ex = Assert.ThrowsAsync<KeyNotFoundException>(async () => await bookManager.GetAllAsync());
+            Assert.That(ex.Message, Is.EqualTo("No books found."));
         }
 
 
         [Test]
         public async Task SearchByTitleAsync_WithValidTitleFragment_ShouldReturnMatchingBooks()
         {
-            Assert.Pass();
+            DatabaseSeeder.SeedDatabaseAsync(dbContext, bookManager);
+
+            var expectedBook = dbContext.Books.FirstOrDefault(b => b.ISBN == "9780307743394");
+
+            var act = await bookManager.SearchByTitleAsync("Pride");
+            var actualBook = act.First();
+            Assert.That(actualBook.Title, Is.EqualTo(expectedBook.Title));
+            Assert.That(actualBook.Author, Is.EqualTo(expectedBook.Author));
+            Assert.That(actualBook.ISBN, Is.EqualTo(expectedBook.ISBN));
         }
 
 
         [Test]
         public async Task SearchByTitleAsync_WithInvalidTitleFragment_ShouldThrowKeyNotFoundException()
         {
-            Assert.Pass();
+            DatabaseSeeder.SeedDatabaseAsync(dbContext, bookManager);
+
+            var ex = Assert.ThrowsAsync<KeyNotFoundException>(async () => await bookManager.SearchByTitleAsync("Non-Existent fragment"));
+            Assert.That(ex.Message, Is.EqualTo("No books found with the given title fragment."));
         }
 
 
         [Test]
         public async Task GetSpecificAsync_WithValidIsbn_ShouldReturnBook()
         {
-            Assert.Pass();
+            string validIsbn = "9780062315007";
+            DatabaseSeeder.SeedDatabaseAsync(dbContext, bookManager);
+            var expectedBook = dbContext.Books.FirstOrDefault(b => b.ISBN == validIsbn);
+
+            var actualBook = await bookManager.GetSpecificAsync(validIsbn);
+            Assert.That(actualBook.Title, Is.EqualTo(expectedBook.Title));
+            Assert.That(actualBook.Author, Is.EqualTo(expectedBook.Author));
+            Assert.That(actualBook.Pages, Is.EqualTo(expectedBook.Pages));
         }
 
 
         [Test]
         public async Task GetSpecificAsync_WithInvalidIsbn_ShouldThrowKeyNotFoundException()
         {
-            Assert.Pass();
+            string invalidIsbn = "000000000";
+            DatabaseSeeder.SeedDatabaseAsync(dbContext, bookManager);
+
+            var ex = Assert.ThrowsAsync<KeyNotFoundException>(async () => await bookManager.GetSpecificAsync(invalidIsbn));
+            Assert.That(ex.Message, Is.EqualTo($"No book found with ISBN: {invalidIsbn}"));
         }
 
 
         [Test]
         public async Task UpdateAsync_WithValidBook_ShouldUpdateBook()
         {
-            Assert.Pass();
+            DatabaseSeeder.SeedDatabaseAsync(dbContext, bookManager);
+            var newBook = new Book
+            {
+                Title = "Test Book",
+                Author = "John Doe",
+                ISBN = "1234567890123",
+                YearPublished = 2021,
+                Genre = "Fiction",
+                Pages = 100,
+                Price = 19.99
+            };
+
+            await bookManager.AddAsync(newBook);
+            var booksInDb = dbContext.Books.ToList();
+            Assert.That(booksInDb.Count(), Is.EqualTo(11));
+
+            string updatedTitle = newBook.Title + " UPDATED";
+            newBook.Title = updatedTitle;
+            await bookManager.UpdateAsync(newBook);
+
+            var updatedBookInDb = dbContext.Books.FirstOrDefault(x => x.Title == updatedTitle);
+            Assert.That(updatedBookInDb, Is.Not.Null);
         }
 
 
         [Test]
         public async Task UpdateAsync_WithInvalidBook_ShouldThrowValidationException()
         {
-            Assert.Pass();
+            DatabaseSeeder.SeedDatabaseAsync(dbContext, bookManager);
+            var invalidBook = new Book
+            {
+
+                Author = "John Doe",
+                ISBN = "1234567890123",
+                YearPublished = 2021,
+                Genre = "Fiction",
+                Pages = 100,
+                Price = 19.99
+            };
+
+            var ex = Assert.ThrowsAsync<ValidationException>(async () => await bookManager.UpdateAsync(invalidBook));
+            Assert.That(ex.Message, Is.EqualTo("Book is invalid."));
         }
 
     }
